@@ -238,10 +238,10 @@
   </div>
 
   <footer>
-    Läuft rein clientseitig — keine Datei verlässt den Browser, nichts wird hochgeladen. Das Ergebnis wird
-    per Blob direkt in die Zwischenablage geschrieben (<code>ClipboardItem</code>), statt zuerst einen einzigen
-    Riesen-String im Speicher zu bauen — das ist der Schritt, der auf iPhone/iPad-Safari sonst am ehesten
-    an Speichergrenzen stößt. Kopieren-Aufrufe laufen synchron im Klick-Handler, wie es Safari verlangt.
+    Läuft rein clientseitig — keine Datei verlässt den Browser, nichts wird hochgeladen. Verarbeitung
+    (Kodieren/Dekodieren) läuft blockweise, damit die Seite bei großen Dateien nicht einfriert. Kopieren
+    nutzt die Standard-Zwischenablage-API mit Fallback für ältere Browser; oberhalb von 6&nbsp;MB wird aus
+    Speichergründen keine volle Vorschau mehr angezeigt — dann bitte „als Datei speichern“ nutzen.
     <br><br>
     © 2025 Titus Wagner — Teil der Projektsammlung: <a href="https://talos-val.github.io/project-data" target="_blank" rel="noopener">talos-val.github.io/project-data</a>
   </footer>
@@ -253,6 +253,17 @@
   const B64_CHUNK = 1024 * 1024;            // 1 MB Zeichen-Blöcke beim Dekodieren
   const PREVIEW_LIMIT = 6 * 1024 * 1024;    // ab hier keine volle Textarea-Vorschau mehr (Safari-Speicher schonen)
   const SNIPPET = 4000;                     // Zeichen am Anfang/Ende für Kurzvorschau
+
+  // Tabs umschalten (Kodieren / Dekodieren) — war versehentlich entfernt worden
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      document.querySelectorAll('.tab').forEach(x=> x.classList.remove('active'));
+      t.classList.add('active');
+      const target = t.dataset.tab;
+      document.getElementById('panel-encode').classList.toggle('hidden', target !== 'encode');
+      document.getElementById('panel-decode').classList.toggle('hidden', target !== 'decode');
+    });
+  });
 
   function fmtBytes(n){
     if(n < 1024) return n + ' B';
@@ -309,31 +320,61 @@
     return parts;
   }
 
-  // Kopiert eine Blob-Quelle (aus Chunk-Array gebaut, nie als ein
-  // JS-String materialisiert) in die Zwischenablage. Muss SYNCHRON im
-  // Klick-Handler aufgerufen werden, sonst blockt Safari den Zugriff
-  // ("User-Aktivierung erforderlich").
-  function copyPartsToClipboard(parts, mimeType, button, labelIdle){
-    const blob = new Blob(parts, {type:mimeType});
-    const item = new ClipboardItem({ [mimeType]: blob });
-    return navigator.clipboard.write([item]).then(()=>{
-      button.textContent = 'Kopiert ✓';
-      setTimeout(()=> button.textContent = labelIdle, 1600);
-      return true;
-    }).catch(async (err)=>{
-      // Fallback: manche Browser erlauben nur writeText mit echtem String.
-      // Nur versuchen, wenn die Gesamtgröße unter der Vorschau-Grenze liegt,
-      // um auf Safari/iOS keinen Speicher-Peak zu riskieren.
-      const totalLen = parts.reduce((s,p)=> s + (p.length||0), 0);
-      if(mimeType === 'text/plain' && totalLen <= PREVIEW_LIMIT){
-        const text = await blob.text();
-        await navigator.clipboard.writeText(text);
-        button.textContent = 'Kopiert ✓';
-        setTimeout(()=> button.textContent = labelIdle, 1600);
-        return true;
-      }
-      throw err;
+  const COPY_LIMIT = 3 * 1024 * 1024; // ab hier kein Kopieren mehr anbieten, nur Download
+
+  // Lässt ein Promise nach ms Millisekunden garantiert fehlschlagen, statt
+  // unbegrenzt zu hängen. Nötig, weil navigator.clipboard.writeText() auf
+  // manchen mobilen Browsern (z.B. bei file://-URLs) nie auflöst.
+  function withTimeout(promise, ms){
+    return new Promise((resolve, reject)=>{
+      const timer = setTimeout(()=> reject(new Error('Zeitüberschreitung bei Zwischenablage')), ms);
+      promise.then(
+        v=>{ clearTimeout(timer); resolve(v); },
+        e=>{ clearTimeout(timer); reject(e); }
+      );
     });
+  }
+
+  // Alte, breit unterstützte Kopiermethode als Fallback (funktioniert auch
+  // ohne Clipboard-API-Berechtigung in vielen mobilen Browsern).
+  function fallbackCopy(text){
+    try{
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-2000px';
+      ta.style.left = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    }catch(e){
+      return false;
+    }
+  }
+
+  async function copyTextToClipboard(text, button, labelIdle){
+    let done = false;
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        await withTimeout(navigator.clipboard.writeText(text), 3000);
+        done = true;
+      }
+    }catch(err){
+      done = false;
+    }
+    if(!done){
+      done = fallbackCopy(text);
+    }
+    if(!done){
+      throw new Error('Kopieren nicht möglich');
+    }
+    button.textContent = 'Kopiert ✓';
+    setTimeout(()=> button.textContent = labelIdle, 1600);
   }
 
   // =================== ENCODE UI ===================
@@ -416,13 +457,17 @@
         encMeta.innerHTML = `Fertig — <strong>${fmtBytes(totalChars)}</strong> Base64-Text in ${dt}s erzeugt.`;
       } else {
         // groß: keinen Mega-String bauen, nur Kurzvorschau anzeigen.
-        // Voller Inhalt bleibt als Chunk-Array im Speicher, Kopieren
-        // läuft über Blob -> ClipboardItem ohne Zwischenstring.
-        const head = parts.join('').slice(0, SNIPPET); // Vorschau selbst ist klein genug zum Joinen
-        encodeOutput.value = `${head}\n\n… [${fmtBytes(totalChars)} insgesamt — volle Vorschau aus Speichergründen deaktiviert] …\n\nNutze „In Zwischenablage kopieren“, um den kompletten Text zu übernehmen.`;
-        encMeta.innerHTML = `Fertig in ${dt}s — <strong>${fmtBytes(totalChars)}</strong> Base64-Text erzeugt. Zu groß für eine flüssige Vorschau, aber vollständig kopierbar.`;
+        const head = parts.join('').slice(0, SNIPPET);
+        encodeOutput.value = `${head}\n\n… [${fmtBytes(totalChars)} insgesamt — volle Vorschau aus Speichergründen deaktiviert] …`;
+        encMeta.innerHTML = `Fertig in ${dt}s — <strong>${fmtBytes(totalChars)}</strong> Base64-Text erzeugt.`;
       }
-      encCopyBtn.disabled = false;
+
+      if(totalChars <= COPY_LIMIT){
+        encCopyBtn.disabled = false;
+      } else {
+        encCopyBtn.disabled = true;
+        encMeta.innerHTML += ` Zu groß zum Kopieren (>${fmtBytes(COPY_LIMIT)}) — bitte herunterladen.`;
+      }
       encDownloadBtn.disabled = false;
     }catch(err){
       encMeta.textContent = 'Fehler: ' + err.message;
@@ -432,12 +477,17 @@
     }
   });
 
-  encCopyBtn.addEventListener('click', ()=>{
+  encCopyBtn.addEventListener('click', async ()=>{
     if(!lastEncodedParts) return;
-    // WICHTIG: synchron aufrufen (kein await davor), sonst verweigert
-    // Safari den Zwischenablage-Zugriff außerhalb der Nutzer-Geste.
-    copyPartsToClipboard(lastEncodedParts, 'text/plain', encCopyBtn, 'In Zwischenablage kopieren')
-      .catch(()=>{ encMeta.textContent = 'Kopieren fehlgeschlagen — bitte „als .txt speichern“ nutzen.'; });
+    encCopyBtn.disabled = true;
+    try{
+      const text = lastEncodedParts.join('');
+      await copyTextToClipboard(text, encCopyBtn, 'In Zwischenablage kopieren');
+    }catch(err){
+      encMeta.textContent = 'Kopieren fehlgeschlagen — bitte „als .txt speichern“ nutzen.';
+    }finally{
+      encCopyBtn.disabled = false;
+    }
   });
 
   encDownloadBtn.addEventListener('click', ()=>{
@@ -508,14 +558,14 @@
       if(isLikelyText){
         decodeOutput.value = combinedForPreview;
         decMeta.innerHTML = `Fertig — <strong>${fmtBytes(totalLen)}</strong> als Text dekodiert in ${dt}s.`;
-        decCopyBtn.disabled = false;
+        decCopyBtn.disabled = totalLen > COPY_LIMIT;
+        if(totalLen > COPY_LIMIT) decMeta.innerHTML += ` Zu groß zum Kopieren — bitte herunterladen.`;
       } else if(totalLen <= PREVIEW_LIMIT){
         decodeOutput.value = `[${fmtBytes(totalLen)} dekodiert — sieht nach Binärdaten aus, nicht als Text darstellbar]`;
         decMeta.innerHTML = `Fertig in ${dt}s. Binärdaten lassen sich nicht sinnvoll im Browser anzeigen — bitte als Datei speichern.`;
       } else {
-        decodeOutput.value = `[${fmtBytes(totalLen)} dekodiert — zu groß für eine Vorschau]`;
-        decMeta.innerHTML = `Fertig in ${dt}s — <strong>${fmtBytes(totalLen)}</strong> dekodiert. Zu groß für Text-Vorschau; falls es sich um Text handelt, trotzdem über Kopieren-Button versuchbar, sonst bitte als Datei speichern.`;
-        decCopyBtn.disabled = false; // Versuch erlauben; Blob-Kopieren prüft/scheitert sauber
+        decodeOutput.value = `[${fmtBytes(totalLen)} dekodiert — zu groß für eine Vorschau, bitte als Datei speichern]`;
+        decMeta.innerHTML = `Fertig in ${dt}s — <strong>${fmtBytes(totalLen)}</strong> dekodiert. Zu groß für Vorschau/Kopieren, bitte als Datei speichern.`;
       }
       decDownloadBtn.disabled = false;
     }catch(err){
@@ -526,10 +576,16 @@
     }
   });
 
-  decCopyBtn.addEventListener('click', ()=>{
-    if(!lastDecodedParts) return;
-    copyPartsToClipboard(lastDecodedParts, 'text/plain', decCopyBtn, 'In Zwischenablage kopieren')
-      .catch(()=>{ decMeta.textContent = 'Kopieren fehlgeschlagen (evtl. Binärdaten) — bitte als Datei speichern.'; });
+  decCopyBtn.addEventListener('click', async ()=>{
+    if(!lastDecodedIsText) return;
+    decCopyBtn.disabled = true;
+    try{
+      await copyTextToClipboard(decodeOutput.value, decCopyBtn, 'In Zwischenablage kopieren');
+    }catch(err){
+      decMeta.textContent = 'Kopieren fehlgeschlagen — bitte als Datei speichern.';
+    }finally{
+      decCopyBtn.disabled = false;
+    }
   });
 
   decDownloadBtn.addEventListener('click', ()=>{
