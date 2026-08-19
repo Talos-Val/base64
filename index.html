@@ -495,7 +495,7 @@
     const blob = new Blob(lastEncodedParts, {type:'text/plain'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = (selectedFile ? selectedFile.name : 'text') + '.base64.txt';
+    a.download = (selectedFile ? selectedFile.name : 'text') + '.txt';
     a.click();
     URL.revokeObjectURL(a.href);
   });
