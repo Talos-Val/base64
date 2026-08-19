@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Base64 Werkzeug</title>
+<style>
+  :root{
+    --bg:#0d1117;
+    --panel:#141a22;
+    --line:#26313d;
+    --text:#dbe4ec;
+    --muted:#7c8b9b;
+    --accent:#4fd1a5;
+    --accent-dim:#2a5f4d;
+    --warn:#e8b23c;
+    --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--mono);
+    min-height:100vh;
+    padding:32px 16px 60px;
+  }
+  .wrap{max-width:860px;margin:0 auto;}
+  header{margin-bottom:28px;}
+  .tag{
+    color:var(--accent);
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    margin:0 0 8px;
+  }
+  h1{
+    margin:0;
+    font-size:26px;
+    font-weight:700;
+    letter-spacing:-0.01em;
+  }
+  p.sub{color:var(--muted);font-size:13px;margin:8px 0 0;line-height:1.5;}
+
+  .tabs{display:flex;gap:2px;margin:26px 0 0;border-bottom:1px solid var(--line);}
+  .tab{
+    padding:10px 18px;
+    cursor:pointer;
+    color:var(--muted);
+    font-size:13px;
+    border-bottom:2px solid transparent;
+    user-select:none;
+  }
+  .tab.active{color:var(--accent);border-color:var(--accent);}
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-top:none;
+    border-radius:0 0 10px 10px;
+    padding:22px;
+  }
+  .hidden{display:none !important;}
+
+  .dropzone{
+    border:1px dashed var(--line);
+    border-radius:8px;
+    padding:26px;
+    text-align:center;
+    color:var(--muted);
+    font-size:13px;
+    cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  .dropzone.drag{border-color:var(--accent);background:rgba(79,209,165,.06);}
+  .dropzone strong{color:var(--text);}
+  input[type=file]{display:none;}
+
+  .or{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin:18px 0;
+    color:var(--muted);
+    font-size:11px;
+    letter-spacing:.1em;
+  }
+  .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line);}
+
+  textarea{
+    width:100%;
+    min-height:150px;
+    resize:vertical;
+    background:#0a0f14;
+    border:1px solid var(--line);
+    border-radius:8px;
+    color:var(--text);
+    font-family:var(--mono);
+    font-size:12.5px;
+    padding:14px;
+    line-height:1.5;
+  }
+  textarea:focus{outline:none;border-color:var(--accent-dim);}
+
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center;}
+  button{
+    background:var(--accent);
+    color:#062018;
+    border:none;
+    padding:10px 18px;
+    border-radius:6px;
+    font-family:var(--mono);
+    font-weight:700;
+    font-size:12.5px;
+    cursor:pointer;
+    letter-spacing:.02em;
+  }
+  button:active{transform:translateY(1px);}
+  button.ghost{
+    background:transparent;
+    color:var(--muted);
+    border:1px solid var(--line);
+    font-weight:400;
+  }
+  button.subtle{
+    background:transparent;
+    color:var(--muted);
+    border:none;
+    text-decoration:underline;
+    padding:10px 4px;
+    font-weight:400;
+  }
+  button:disabled{opacity:.4;cursor:not-allowed;}
+
+  .meta{color:var(--muted);font-size:12px;margin-top:6px;min-height:16px;line-height:1.5;}
+  .meta strong{color:var(--text);}
+  .meta.mode{color:var(--accent);}
+
+  .progress-wrap{
+    display:none;
+    margin-top:14px;
+    height:6px;
+    background:#0a0f14;
+    border-radius:99px;
+    overflow:hidden;
+    border:1px solid var(--line);
+  }
+  .progress-wrap.show{display:block;}
+  .progress-bar{
+    height:100%;
+    width:0%;
+    background:var(--accent);
+    transition:width .08s linear;
+  }
+
+  .file-chip{
+    display:none;
+    align-items:center;
+    gap:10px;
+    background:#0a0f14;
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:10px 14px;
+    margin-top:14px;
+    font-size:12.5px;
+  }
+  .file-chip.show{display:flex;}
+  .file-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+  .file-chip .name{color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .file-chip .size{color:var(--muted);}
+  .file-chip .x{cursor:pointer;color:var(--muted);}
+
+  footer{margin-top:30px;color:var(--muted);font-size:11px;line-height:1.6;}
+  footer a{color:var(--accent);text-decoration:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="tag">Offline &middot; Bleibt im Browser &middot; Safari/iOS-kompatibel</p>
+    <h1>Base64 Werkzeug</h1>
+    <p class="sub">Kodiert oder dekodiert Text und Dateien vollständig im Browser — Ergebnis bleibt als Text auf der Seite bzw. in der Zwischenablage, kein Datei-Download nötig. Verarbeitung läuft blockweise, damit auch Safari/iOS mit ihrem knapperen Speicherbudget große Dateien nicht crashen lässt.</p>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="encode">Kodieren</div>
+    <div class="tab" data-tab="decode">Dekodieren</div>
+  </div>
+
+  <!-- ENCODE PANEL -->
+  <div class="panel" id="panel-encode">
+    <div class="dropzone" id="dropzone">
+      <div>📄 Datei hier ablegen oder <strong>klicken zum Auswählen</strong></div>
+    </div>
+    <input type="file" id="fileInput">
+
+    <div class="file-chip" id="fileChip">
+      <div class="dot"></div>
+      <div class="name" id="fileName"></div>
+      <div class="size" id="fileSize"></div>
+      <div class="x" id="fileClear">✕</div>
+    </div>
+
+    <div class="or">ODER TEXT EINGEBEN</div>
+    <textarea id="encodeInput" placeholder="Text hier eingeben..."></textarea>
+
+    <div class="progress-wrap" id="encProgressWrap"><div class="progress-bar" id="encProgressBar"></div></div>
+    <div class="meta" id="encMeta"></div>
+
+    <div class="row">
+      <button id="encodeBtn">Kodieren</button>
+      <button class="ghost" id="encCopyBtn" disabled>In Zwischenablage kopieren</button>
+      <button class="subtle" id="encDownloadBtn" disabled>stattdessen als .txt speichern</button>
+    </div>
+
+    <div style="margin-top:16px;">
+      <textarea id="encodeOutput" placeholder="Base64-Ergebnis erscheint hier..." readonly></textarea>
+    </div>
+  </div>
+
+  <!-- DECODE PANEL -->
+  <div class="panel hidden" id="panel-decode">
+    <textarea id="decodeInput" placeholder="Base64-String hier einfügen..."></textarea>
+
+    <div class="progress-wrap" id="decProgressWrap"><div class="progress-bar" id="decProgressBar"></div></div>
+    <div class="meta" id="decMeta"></div>
+
+    <div class="row">
+      <button id="decodeBtn">Dekodieren</button>
+      <button class="ghost" id="decCopyBtn" disabled>In Zwischenablage kopieren</button>
+      <button class="subtle" id="decDownloadBtn" disabled>als Datei speichern (bei Binärdaten nötig)</button>
+    </div>
+
+    <div style="margin-top:16px;">
+      <textarea id="decodeOutput" placeholder="Dekodierter Text erscheint hier..." readonly></textarea>
+    </div>
+  </div>
+
+  <footer>
+    Läuft rein clientseitig — keine Datei verlässt den Browser, nichts wird hochgeladen. Das Ergebnis wird
+    per Blob direkt in die Zwischenablage geschrieben (<code>ClipboardItem</code>), statt zuerst einen einzigen
+    Riesen-String im Speicher zu bauen — das ist der Schritt, der auf iPhone/iPad-Safari sonst am ehesten
+    an Speichergrenzen stößt. Kopieren-Aufrufe laufen synchron im Klick-Handler, wie es Safari verlangt.
+    <br><br>
+    © 2025 Titus Wagner — Teil der Projektsammlung: <a href="https://talos-val.github.io/project-data" target="_blank" rel="noopener">talos-val.github.io/project-data</a>
+  </footer>
+</div>
+
+<script>
+(function(){
+  const CHUNK = 1024 * 512;                 // 512 KB Rohdaten-Blöcke beim Kodieren
+  const B64_CHUNK = 1024 * 1024;            // 1 MB Zeichen-Blöcke beim Dekodieren
+  const PREVIEW_LIMIT = 6 * 1024 * 1024;    // ab hier keine volle Textarea-Vorschau mehr (Safari-Speicher schonen)
+  const SNIPPET = 4000;                     // Zeichen am Anfang/Ende für Kurzvorschau
+
+  function fmtBytes(n){
+    if(n < 1024) return n + ' B';
+    if(n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+    if(n < 1024*1024*1024) return (n/1024/1024).toFixed(1) + ' MB';
+    return (n/1024/1024/1024).toFixed(2) + ' GB';
+  }
+  function yield_(){ return new Promise(r => setTimeout(r, 0)); }
+
+  // ===================================================================
+  // ENCODE: Blob/Text -> Base64, als Array von Fragmenten (nie ein
+  // einzelner Riesen-String -> das war das alte "Invalid string length"
+  // Limit bei ca. 1 GB, und der Speicherpeak, der Safari/iOS am ehesten
+  // aus dem Tab wirft).
+  // ===================================================================
+  async function encodeBlobToChunkArray(blob, onProgress){
+    const total = blob.size;
+    let offset = 0;
+    const step = CHUNK - (CHUNK % 3); // durch 3 teilbar -> keine Padding-Fragmente an Blockgrenzen
+    const parts = [];
+    while(offset < total){
+      const slice = blob.slice(offset, Math.min(offset + step, total));
+      const buf = await slice.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+      parts.push(btoa(binary));
+      offset += step;
+      if(onProgress) onProgress(Math.min(offset,total), total);
+      await yield_();
+    }
+    return parts;
+  }
+
+  // ===================================================================
+  // DECODE: Base64 -> Bytes, ebenfalls als Array von Uint8Array-Blöcken
+  // ===================================================================
+  async function decodeBase64ToChunkArray(b64, onProgress){
+    const clean = b64.replace(/\s+/g,'');
+    const total = clean.length;
+    let offset = 0;
+    const step = B64_CHUNK - (B64_CHUNK % 4); // durch 4 teilbar -> gültige Base64-Gruppen
+    const parts = [];
+    while(offset < total){
+      const chunkStr = clean.slice(offset, offset + step);
+      const binary = atob(chunkStr);
+      const arr = new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++) arr[i] = binary.charCodeAt(i);
+      parts.push(arr);
+      offset += step;
+      if(onProgress) onProgress(Math.min(offset,total), total);
+      await yield_();
+    }
+    return parts;
+  }
+
+  // Kopiert eine Blob-Quelle (aus Chunk-Array gebaut, nie als ein
+  // JS-String materialisiert) in die Zwischenablage. Muss SYNCHRON im
+  // Klick-Handler aufgerufen werden, sonst blockt Safari den Zugriff
+  // ("User-Aktivierung erforderlich").
+  function copyPartsToClipboard(parts, mimeType, button, labelIdle){
+    const blob = new Blob(parts, {type:mimeType});
+    const item = new ClipboardItem({ [mimeType]: blob });
+    return navigator.clipboard.write([item]).then(()=>{
+      button.textContent = 'Kopiert ✓';
+      setTimeout(()=> button.textContent = labelIdle, 1600);
+      return true;
+    }).catch(async (err)=>{
+      // Fallback: manche Browser erlauben nur writeText mit echtem String.
+      // Nur versuchen, wenn die Gesamtgröße unter der Vorschau-Grenze liegt,
+      // um auf Safari/iOS keinen Speicher-Peak zu riskieren.
+      const totalLen = parts.reduce((s,p)=> s + (p.length||0), 0);
+      if(mimeType === 'text/plain' && totalLen <= PREVIEW_LIMIT){
+        const text = await blob.text();
+        await navigator.clipboard.writeText(text);
+        button.textContent = 'Kopiert ✓';
+        setTimeout(()=> button.textContent = labelIdle, 1600);
+        return true;
+      }
+      throw err;
+    });
+  }
+
+  // =================== ENCODE UI ===================
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const fileChip = document.getElementById('fileChip');
+  const fileName = document.getElementById('fileName');
+  const fileSize = document.getElementById('fileSize');
+  const fileClear = document.getElementById('fileClear');
+  const encodeInput = document.getElementById('encodeInput');
+  const encodeOutput = document.getElementById('encodeOutput');
+  const encodeBtn = document.getElementById('encodeBtn');
+  const encCopyBtn = document.getElementById('encCopyBtn');
+  const encDownloadBtn = document.getElementById('encDownloadBtn');
+  const encMeta = document.getElementById('encMeta');
+  const encProgressWrap = document.getElementById('encProgressWrap');
+  const encProgressBar = document.getElementById('encProgressBar');
+
+  let selectedFile = null;
+  let lastEncodedParts = null;
+
+  dropzone.addEventListener('click', ()=> fileInput.click());
+  dropzone.addEventListener('dragover', e=>{e.preventDefault(); dropzone.classList.add('drag');});
+  dropzone.addEventListener('dragleave', ()=> dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', e=>{
+    e.preventDefault();
+    dropzone.classList.remove('drag');
+    if(e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', e=>{
+    if(e.target.files.length) setFile(e.target.files[0]);
+  });
+  fileClear.addEventListener('click', e=>{
+    e.stopPropagation();
+    selectedFile = null;
+    fileChip.classList.remove('show');
+    fileInput.value = '';
+  });
+
+  function setFile(f){
+    selectedFile = f;
+    fileName.textContent = f.name;
+    fileSize.textContent = fmtBytes(f.size);
+    fileChip.classList.add('show');
+    encodeInput.value = '';
+  }
+
+  encodeBtn.addEventListener('click', async ()=>{
+    if(!selectedFile && !encodeInput.value){
+      encMeta.textContent = 'Bitte Datei wählen oder Text eingeben.';
+      return;
+    }
+
+    const sourceBlob = selectedFile ? selectedFile : new Blob([new TextEncoder().encode(encodeInput.value)]);
+
+    encodeBtn.disabled = true;
+    encCopyBtn.disabled = true;
+    encDownloadBtn.disabled = true;
+    encodeOutput.value = '';
+    lastEncodedParts = null;
+    encProgressWrap.classList.add('show');
+    encProgressBar.style.width = '0%';
+    const t0 = performance.now();
+
+    const onProgress = (done, total)=>{
+      const pct = total ? (done/total*100) : 100;
+      encProgressBar.style.width = pct.toFixed(1) + '%';
+      encMeta.innerHTML = `<strong>${fmtBytes(done)}</strong> / ${fmtBytes(total)} verarbeitet…`;
+    };
+
+    try{
+      const parts = await encodeBlobToChunkArray(sourceBlob, onProgress);
+      lastEncodedParts = parts;
+      const totalChars = parts.reduce((s,p)=>s+p.length,0);
+      const dt = ((performance.now()-t0)/1000).toFixed(2);
+
+      if(totalChars <= PREVIEW_LIMIT){
+        // klein genug: voller String, direkt sichtbar & markierbar
+        encodeOutput.value = parts.join('');
+        encMeta.innerHTML = `Fertig — <strong>${fmtBytes(totalChars)}</strong> Base64-Text in ${dt}s erzeugt.`;
+      } else {
+        // groß: keinen Mega-String bauen, nur Kurzvorschau anzeigen.
+        // Voller Inhalt bleibt als Chunk-Array im Speicher, Kopieren
+        // läuft über Blob -> ClipboardItem ohne Zwischenstring.
+        const head = parts.join('').slice(0, SNIPPET); // Vorschau selbst ist klein genug zum Joinen
+        encodeOutput.value = `${head}\n\n… [${fmtBytes(totalChars)} insgesamt — volle Vorschau aus Speichergründen deaktiviert] …\n\nNutze „In Zwischenablage kopieren“, um den kompletten Text zu übernehmen.`;
+        encMeta.innerHTML = `Fertig in ${dt}s — <strong>${fmtBytes(totalChars)}</strong> Base64-Text erzeugt. Zu groß für eine flüssige Vorschau, aber vollständig kopierbar.`;
+      }
+      encCopyBtn.disabled = false;
+      encDownloadBtn.disabled = false;
+    }catch(err){
+      encMeta.textContent = 'Fehler: ' + err.message;
+    }finally{
+      encodeBtn.disabled = false;
+      encProgressWrap.classList.remove('show');
+    }
+  });
+
+  encCopyBtn.addEventListener('click', ()=>{
+    if(!lastEncodedParts) return;
+    // WICHTIG: synchron aufrufen (kein await davor), sonst verweigert
+    // Safari den Zwischenablage-Zugriff außerhalb der Nutzer-Geste.
+    copyPartsToClipboard(lastEncodedParts, 'text/plain', encCopyBtn, 'In Zwischenablage kopieren')
+      .catch(()=>{ encMeta.textContent = 'Kopieren fehlgeschlagen — bitte „als .txt speichern“ nutzen.'; });
+  });
+
+  encDownloadBtn.addEventListener('click', ()=>{
+    if(!lastEncodedParts) return;
+    const blob = new Blob(lastEncodedParts, {type:'text/plain'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (selectedFile ? selectedFile.name : 'text') + '.base64.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // =================== DECODE UI ===================
+  const decodeInput = document.getElementById('decodeInput');
+  const decodeOutput = document.getElementById('decodeOutput');
+  const decodeBtn = document.getElementById('decodeBtn');
+  const decCopyBtn = document.getElementById('decCopyBtn');
+  const decDownloadBtn = document.getElementById('decDownloadBtn');
+  const decMeta = document.getElementById('decMeta');
+  const decProgressWrap = document.getElementById('decProgressWrap');
+  const decProgressBar = document.getElementById('decProgressBar');
+
+  let lastDecodedParts = null;
+  let lastDecodedIsText = false;
+
+  decodeBtn.addEventListener('click', async ()=>{
+    const input = decodeInput.value.trim();
+    if(!input){
+      decMeta.textContent = 'Bitte Base64-Text einfügen.';
+      return;
+    }
+
+    decodeBtn.disabled = true;
+    decCopyBtn.disabled = true;
+    decDownloadBtn.disabled = true;
+    decodeOutput.value = '';
+    lastDecodedParts = null;
+    lastDecodedIsText = false;
+    decProgressWrap.classList.add('show');
+    decProgressBar.style.width = '0%';
+    const t0 = performance.now();
+
+    const onProgress = (done, total)=>{
+      const pct = total ? (done/total*100) : 100;
+      decProgressBar.style.width = pct.toFixed(1) + '%';
+      decMeta.innerHTML = `<strong>${fmtBytes(done)}</strong> / ${fmtBytes(total)} verarbeitet…`;
+    };
+
+    try{
+      const parts = await decodeBase64ToChunkArray(input, onProgress);
+      lastDecodedParts = parts;
+      const totalLen = parts.reduce((s,p)=>s+p.length,0);
+      const dt = ((performance.now()-t0)/1000).toFixed(2);
+
+      let isLikelyText = false;
+      let combinedForPreview = '';
+      if(totalLen <= PREVIEW_LIMIT){
+        const merged = new Uint8Array(totalLen);
+        let off=0;
+        for(const p of parts){ merged.set(p, off); off+=p.length; }
+        try{
+          combinedForPreview = new TextDecoder('utf-8', {fatal:true}).decode(merged);
+          isLikelyText = true;
+        }catch(e){ isLikelyText = false; }
+      }
+      lastDecodedIsText = isLikelyText;
+
+      if(isLikelyText){
+        decodeOutput.value = combinedForPreview;
+        decMeta.innerHTML = `Fertig — <strong>${fmtBytes(totalLen)}</strong> als Text dekodiert in ${dt}s.`;
+        decCopyBtn.disabled = false;
+      } else if(totalLen <= PREVIEW_LIMIT){
+        decodeOutput.value = `[${fmtBytes(totalLen)} dekodiert — sieht nach Binärdaten aus, nicht als Text darstellbar]`;
+        decMeta.innerHTML = `Fertig in ${dt}s. Binärdaten lassen sich nicht sinnvoll im Browser anzeigen — bitte als Datei speichern.`;
+      } else {
+        decodeOutput.value = `[${fmtBytes(totalLen)} dekodiert — zu groß für eine Vorschau]`;
+        decMeta.innerHTML = `Fertig in ${dt}s — <strong>${fmtBytes(totalLen)}</strong> dekodiert. Zu groß für Text-Vorschau; falls es sich um Text handelt, trotzdem über Kopieren-Button versuchbar, sonst bitte als Datei speichern.`;
+        decCopyBtn.disabled = false; // Versuch erlauben; Blob-Kopieren prüft/scheitert sauber
+      }
+      decDownloadBtn.disabled = false;
+    }catch(err){
+      decMeta.textContent = 'Fehler: Ungültiger Base64-Text — ' + err.message;
+    }finally{
+      decodeBtn.disabled = false;
+      decProgressWrap.classList.remove('show');
+    }
+  });
+
+  decCopyBtn.addEventListener('click', ()=>{
+    if(!lastDecodedParts) return;
+    copyPartsToClipboard(lastDecodedParts, 'text/plain', decCopyBtn, 'In Zwischenablage kopieren')
+      .catch(()=>{ decMeta.textContent = 'Kopieren fehlgeschlagen (evtl. Binärdaten) — bitte als Datei speichern.'; });
+  });
+
+  decDownloadBtn.addEventListener('click', ()=>{
+    if(!lastDecodedParts) return;
+    const blob = new Blob(lastDecodedParts);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'decoded.bin';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+})();
+</script>
+</body>
+</html>
